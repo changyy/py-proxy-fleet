@@ -1,0 +1,20 @@
+# Sample proxy list for testing
+# Format: host:port (one per line)
+# Replace these with real working proxy servers
+
+# Example SOCKS5 proxies (these are placeholders)
+192.168.1.100:1080
+192.168.1.101:1080
+10.0.0.100:1080
+
+# Example HTTP proxies (these are placeholders)  
+192.168.1.200:8080
+192.168.1.201:3128
+10.0.0.200:8080
+
+# Note: These are example IP addresses and won't work
+# To test with real proxies, replace with actual proxy server addresses
+# You can find free proxy lists at:
+# - https://github.com/TheSpeedX/PROXY-List
+# - https://www.proxy-list.download/
+# - https://free-proxy-list.net/
