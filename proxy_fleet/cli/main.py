@@ -441,9 +441,10 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
             return
         
         click.echo(f"🔍 Starting validation of {len(proxies)} proxy servers (type: {test_proxy_type.upper()})")
+        click.echo(f"🔧 Using {concurrent} concurrent connections for validation")
         
         # Validate proxies
-        valid_proxies = await validate_proxies(proxies, storage)
+        valid_proxies = await validate_proxies(proxies, storage, concurrent)
         
         click.echo(f"\n📊 Validation completed")
         click.echo(f"   Valid proxies: {len(valid_proxies)}")
@@ -564,9 +565,10 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
         
         click.echo(f"📥 Found {len(all_proxies)} existing proxy servers")
         click.echo(f"🔍 Starting re-validation (type: {test_proxy_type.upper()})")
+        click.echo(f"🔧 Using {concurrent} concurrent connections for validation")
         
         # Re-validate all proxies
-        valid_proxies = await validate_proxies(all_proxies, storage)
+        valid_proxies = await validate_proxies(all_proxies, storage, concurrent)
         
         click.echo(f"\n📊 Re-validation completed")
         click.echo(f"   Valid proxies: {len(valid_proxies)}")
@@ -607,96 +609,145 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
         
         click.echo(f"✅ Task retry completed, results updated to {task_output_dir}/")
     
-    async def validate_proxies(proxies, storage):
+    async def validate_proxies(proxies, storage, max_concurrent):
         """Validate proxy list"""
         # Initialize validator
         validator = SocksValidator(timeout=test_proxy_timeout, check_ip_info=True)
         valid_proxies = []
         
         # Use concurrency control to validate proxies
-        semaphore = asyncio.Semaphore(concurrent)
+        semaphore = asyncio.Semaphore(max_concurrent)
         
-        async def validate_single_proxy(proxy):
-            async with semaphore:
-                host, port = proxy["host"], proxy["port"]
+        # Add debug info for concurrency
+        click.echo(f"🔧 Concurrency settings: {max_concurrent} concurrent connections")
+        click.echo(f"🔧 Creating ThreadPoolExecutor with max_workers={min(max_concurrent, 500)}")
+        
+        # Create a larger thread pool to handle high concurrency
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        
+        # Track active tasks for interruption handling
+        active_tasks = 0
+        max_active_tasks = 0
+        completed_tasks = 0
+        
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_concurrent, 500)) as executor:
+                # Set the custom executor for this event loop
+                old_executor = loop._default_executor
+                loop.set_default_executor(executor)
                 
-                try:
-                    # Choose validation method based on proxy type
-                    if test_proxy_type.lower() == 'socks4':
-                        result = await validator.async_validate_socks4(host, port)
-                    elif test_proxy_type.lower() == 'socks5':
-                        result = await validator.async_validate_socks5(host, port)
-                    elif test_proxy_type.lower() == 'http':
-                        result = await validator.async_validate_http(host, port)
-                    else:
-                        result = ValidationResult(is_valid=False, error="Unsupported proxy type")
-                    
-                    if result.is_valid:
-                        # Additional HTTP request validation
-                        http_success = True
-                        http_response_data = None
-                        if test_proxy_with_request:
-                            try:
-                                import aiohttp
-                                from aiohttp_socks import ProxyConnector, ProxyType
-                                
-                                # Choose connector based on proxy type
-                                if test_proxy_type.lower() in ['socks4', 'socks5']:
-                                    proxy_type = ProxyType.SOCKS5 if test_proxy_type.lower() == 'socks5' else ProxyType.SOCKS4
-                                    connector = ProxyConnector(
-                                        proxy_type=proxy_type,
-                                        host=host,
-                                        port=port
-                                    )
-                                    session_kwargs = {'connector': connector}
-                                else:  # http proxy
-                                    connector = aiohttp.TCPConnector()
-                                    session_kwargs = {
-                                        'connector': connector,
-                                        'proxy': f"http://{host}:{port}"
-                                    }
-                                
-                                async with aiohttp.ClientSession(
-                                    timeout=aiohttp.ClientTimeout(total=test_proxy_timeout),
-                                    **session_kwargs
-                                ) as session:
-                                    async with session.get(test_proxy_with_request) as response:
-                                        response_text = await response.text()
-                                        http_success = response.status in [200, 301, 302]
+                async def validate_single_proxy(proxy):
+                    nonlocal active_tasks, max_active_tasks, completed_tasks
+                    async with semaphore:
+                        active_tasks += 1
+                        if active_tasks > max_active_tasks:
+                            max_active_tasks = active_tasks
+                        
+                        host, port = proxy["host"], proxy["port"]
+                        
+                        try:
+                            # Choose validation method based on proxy type
+                            if test_proxy_type.lower() == 'socks4':
+                                result = await validator.async_validate_socks4(host, port)
+                            elif test_proxy_type.lower() == 'socks5':
+                                result = await validator.async_validate_socks5(host, port)
+                            elif test_proxy_type.lower() == 'http':
+                                result = await validator.async_validate_http(host, port)
+                            else:
+                                result = ValidationResult(is_valid=False, error="Unsupported proxy type")
+                            
+                            if result.is_valid:
+                                # Additional HTTP request validation
+                                http_success = True
+                                http_response_data = None
+                                if test_proxy_with_request:
+                                    try:
+                                        import aiohttp
+                                        from aiohttp_socks import ProxyConnector, ProxyType
                                         
-                                        # Store HTTP request test result
+                                        # Choose connector based on proxy type
+                                        if test_proxy_type.lower() in ['socks4', 'socks5']:
+                                            proxy_type = ProxyType.SOCKS5 if test_proxy_type.lower() == 'socks5' else ProxyType.SOCKS4
+                                            connector = ProxyConnector(
+                                                proxy_type=proxy_type,
+                                                host=host,
+                                                port=port
+                                            )
+                                            session_kwargs = {'connector': connector}
+                                        else:  # http proxy
+                                            connector = aiohttp.TCPConnector()
+                                            session_kwargs = {
+                                                'connector': connector,
+                                                'proxy': f"http://{host}:{port}"
+                                            }
+                                        
+                                        async with aiohttp.ClientSession(
+                                            timeout=aiohttp.ClientTimeout(total=test_proxy_timeout),
+                                            **session_kwargs
+                                        ) as session:
+                                            async with session.get(test_proxy_with_request) as response:
+                                                response_text = await response.text()
+                                                http_success = response.status in [200, 301, 302]
+                                                
+                                                # Store HTTP request test result
+                                                http_response_data = {
+                                                    "url": test_proxy_with_request,
+                                                    "status_code": response.status,
+                                                    "success": http_success,
+                                                    "response_body": response_text[:500] if response_text else None,  # Limit to 500 chars
+                                                    "headers": dict(response.headers)
+                                                }
+                                    except Exception as e:
+                                        http_success = False
                                         http_response_data = {
                                             "url": test_proxy_with_request,
-                                            "status_code": response.status,
-                                            "success": http_success,
-                                            "response_body": response_text[:500] if response_text else None,  # Limit to 500 chars
-                                            "headers": dict(response.headers)
+                                            "success": False,
+                                            "error": str(e)
                                         }
-                            except Exception as e:
-                                http_success = False
-                                http_response_data = {
-                                    "url": test_proxy_with_request,
-                                    "success": False,
-                                    "error": str(e)
-                                }
-                        
-                        # If no additional HTTP validation required, or HTTP validation successful, consider proxy valid
-                        if not test_proxy_with_request or http_success:
-                            storage.update_proxy_status(host, port, True, result.ip_info, test_proxy_type.lower(), http_response_data)
-                            return {"proxy": proxy, "result": result, "http_success": http_success}
-                        else:
-                            storage.update_proxy_status(host, port, False, result.ip_info, test_proxy_type.lower(), http_response_data)
-                            return {"proxy": proxy, "result": result, "http_success": http_success}
-                    else:
-                        storage.update_proxy_status(host, port, False, proxy_type=test_proxy_type.lower())
-                        return {"proxy": proxy, "result": result, "http_success": None}
-                        
-                except Exception as e:
-                    storage.update_proxy_status(host, port, False, proxy_type=test_proxy_type.lower())
-                    return {"proxy": proxy, "result": None, "error": str(e)}
+                                
+                                # If no additional HTTP validation required, or HTTP validation successful, consider proxy valid
+                                if not test_proxy_with_request or http_success:
+                                    storage.update_proxy_status(host, port, True, result.ip_info, test_proxy_type.lower(), http_response_data)
+                                    return {"proxy": proxy, "result": result, "http_success": http_success}
+                                else:
+                                    storage.update_proxy_status(host, port, False, result.ip_info, test_proxy_type.lower(), http_response_data)
+                                    return {"proxy": proxy, "result": result, "http_success": http_success}
+                            else:
+                                storage.update_proxy_status(host, port, False, proxy_type=test_proxy_type.lower())
+                                return {"proxy": proxy, "result": result, "http_success": None}
+                                
+                        except Exception as e:
+                            storage.update_proxy_status(host, port, False, proxy_type=test_proxy_type.lower())
+                            return {"proxy": proxy, "result": None, "error": str(e)}
+                        finally:
+                            active_tasks -= 1
+                            completed_tasks += 1
+                
+                # Validate all proxies concurrently
+                validation_results = await asyncio.gather(*[validate_single_proxy(proxy) for proxy in proxies])
+                
+                # Restore the original executor (only if it was not None)
+                if old_executor is not None:
+                    loop.set_default_executor(old_executor)
         
-        # Validate all proxies concurrently
-        validation_results = await asyncio.gather(*[validate_single_proxy(proxy) for proxy in proxies])
+        except KeyboardInterrupt:
+            click.echo(f"\n⚠️  Interrupted by user (Ctrl+C)")
+            click.echo(f"🔧 Active concurrent tasks: {active_tasks}")
+            click.echo(f"🔧 Completed tasks: {completed_tasks}/{len(proxies)}")
+            click.echo(f"🔧 Peak concurrent tasks: {max_active_tasks}")
+            click.echo("⏳ Waiting for active tasks to complete...")
+            
+            # Give some time for active tasks to complete gracefully
+            try:
+                await asyncio.sleep(1)
+            except:
+                pass
+            
+            click.echo("❌ Validation interrupted")
+            raise
+        
+        click.echo(f"🔧 Peak concurrent tasks: {max_active_tasks}")
         
         # Process validation results
         for i, validation_result in enumerate(validation_results, 1):
@@ -808,7 +859,12 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
         # Execute all tasks concurrently
         await asyncio.gather(*[execute_task(task) for task in tasks])
     
-    asyncio.run(run_proxy_fleet())
+    try:
+        asyncio.run(run_proxy_fleet())
+    except KeyboardInterrupt:
+        click.echo("\n⚠️  Program interrupted by user (Ctrl+C)")
+        click.echo("👋 Goodbye!")
+        sys.exit(130)  # Standard exit code for SIGINT
 
 
 if __name__ == '__main__':
