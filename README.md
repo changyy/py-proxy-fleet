@@ -38,7 +38,7 @@ proxy-fleet provides six main usage scenarios:
 proxy-fleet --test-proxy-server proxies.txt
 
 # From stdin (thanks to https://github.com/TheSpeedX/PROXY-List for proxy contributions)
-curl -sL 'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt' | proxy-fleet --test-proxy-server - --concurrent 100 --test-proxy-timeout 10 --test-proxy-with-request 'https://ipinfo.io'
+curl -sL 'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt' | proxy-fleet --test-proxy-server - --concurrent 100 --test-proxy-timeout 10 --test-proxy-with-request 'https://ipinfo.io/json'
 ```
 
 #### Scenario 2 - Validate existing proxy servers in storage
@@ -299,7 +299,7 @@ Thanks to [TheSpeedX/PROXY-List](https://github.com/TheSpeedX/PROXY-List) for pr
 
 ```bash
 # Test SOCKS5 proxies from TheSpeedX repository
-curl -sL 'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt' | proxy-fleet --test-proxy-server - --concurrent 100 --test-proxy-timeout 10 --test-proxy-with-request 'https://ipinfo.io'
+curl -sL 'https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt' | proxy-fleet --test-proxy-server - --concurrent 100 --test-proxy-timeout 10 --test-proxy-with-request 'https://ipinfo.io/json'
 
 # Test HTTP proxies
 curl -sL 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt' | proxy-fleet --test-proxy-server - --test-proxy-type http --concurrent 50
