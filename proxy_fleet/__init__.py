@@ -8,7 +8,7 @@ from .models.proxy import ProxyServer, ProxyStatus, ProxyProtocol
 from .models.task import HttpTask, TaskResult, TaskStatus, HttpMethod
 from .models.config import FleetConfig
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 __author__ = "changyy"
 
 __all__ = [

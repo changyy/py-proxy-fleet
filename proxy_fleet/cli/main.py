@@ -320,10 +320,33 @@ def parse_proxy_line(line: str) -> Optional[Dict[str, Any]]:
 @click.option('--concurrent', default=10, 
               help='Maximum concurrent connections for proxy testing and task execution')
 @click.option('--verbose', '-v', is_flag=True, help='Show verbose output')
+@click.option('--start-proxy-server', is_flag=True, default=False,
+              help='Start HTTP proxy server that rotates through verified proxies')
+@click.option('--enhanced-proxy-server', is_flag=True, default=False,
+              help='Start enhanced HTTP proxy server with advanced load balancing')
+@click.option('--proxy-server-config', default='proxy_server_config.json',
+              help='Configuration file for enhanced proxy server (default: proxy_server_config.json)')
+@click.option('--proxy-server-host', default='127.0.0.1',
+              help='Proxy server host (default: 127.0.0.1)')
+@click.option('--proxy-server-port', default=8888, type=int,
+              help='Proxy server port (default: 8888)')
+@click.option('--proxy-server-workers', default=None, type=int,
+              help='Number of worker processes (default: CPU count)')
+@click.option('--proxy-server-rotation', 
+              type=click.Choice(['round-robin', 'random'], case_sensitive=False),
+              default='round-robin',
+              help='Proxy rotation mode for basic server (default: round-robin)')
+@click.option('--proxy-server-strategy',
+              type=click.Choice(['round_robin', 'random', 'least_connections', 'weighted', 'response_time', 'fail_over'], case_sensitive=False),
+              help='Load balancing strategy for enhanced server')
+@click.option('--single-process', is_flag=True, default=False,
+              help='Run enhanced server in single process mode (for development)')
+@click.option('--generate-config', is_flag=True, default=False,
+              help='Generate default proxy server configuration file')
 def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request, 
          test_proxy_server, test_proxy_storage, proxy_storage, list_proxy, list_proxy_verified, list_proxy_failed, remove_proxy_failed, list_task_result,
          task_input, task_retry, task_output_dir, 
-         concurrent, verbose):
+         concurrent, verbose, start_proxy_server, enhanced_proxy_server, proxy_server_config, proxy_server_host, proxy_server_port, proxy_server_workers, proxy_server_rotation, proxy_server_strategy, single_process, generate_config):
     """
     proxy-fleet: High-performance proxy server management tool
     
@@ -331,6 +354,8 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
     1. Validate SOCKS/HTTP proxy servers
     2. Execute HTTP request tasks
     3. Log proxy status and usage statistics
+    4. Run HTTP proxy server with verified proxy rotation
+    5. Enhanced proxy server with intelligent load balancing
     
     Usage Scenarios:
     
@@ -369,6 +394,29 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
     Scenario 7 - List current task results:
     # Check task result statistics
     proxy-fleet --list-task-result
+    
+    Scenario 8 - Start basic HTTP proxy server:
+    # Start proxy server that rotates through verified proxies
+    proxy-fleet --start-proxy-server --proxy-server-port 8888
+    
+    # Start with random rotation instead of round-robin
+    proxy-fleet --start-proxy-server --proxy-server-rotation random
+    
+    Scenario 9 - Start enhanced HTTP proxy server:
+    # Generate default configuration file
+    proxy-fleet --generate-config
+    
+    # Start enhanced server with intelligent load balancing
+    proxy-fleet --enhanced-proxy-server
+    
+    # Start with custom configuration
+    proxy-fleet --enhanced-proxy-server --proxy-server-config my_config.json
+    
+    # Start with specific strategy and workers
+    proxy-fleet --enhanced-proxy-server --proxy-server-strategy least_connections --proxy-server-workers 8
+    
+    # Start in single process mode for development
+    proxy-fleet --enhanced-proxy-server --single-process
     """
     
     async def run_proxy_fleet():
@@ -377,7 +425,16 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
             logging.getLogger().setLevel(logging.DEBUG)
         
         # Determine running mode
-        if list_proxy:
+        if generate_config:
+            # Mode: Generate configuration file
+            await run_generate_config_mode()
+        elif enhanced_proxy_server:
+            # Mode: Start enhanced HTTP proxy server
+            await run_enhanced_proxy_server_mode()
+        elif start_proxy_server:
+            # Mode: Start basic HTTP proxy server
+            await run_proxy_server_mode()
+        elif list_proxy:
             # List all proxy status
             await run_list_proxy_mode('all')
         elif list_proxy_verified:
@@ -406,6 +463,9 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
             await run_task_execution_mode()
         else:
             click.echo("❌ Please specify a running mode:")
+            click.echo("   Configuration mode: --generate-config")
+            click.echo("   Enhanced proxy server mode: --enhanced-proxy-server")
+            click.echo("   Basic proxy server mode: --start-proxy-server")
             click.echo("   Proxy validation mode: --test-proxy-server <file|-> or --test-proxy-storage")
             click.echo("   Proxy management mode: --list-proxy, --list-proxy-verified, --list-proxy-failed, or --remove-proxy-failed")
             click.echo("   Task execution mode: --task-input <file|-> or --task-retry")
@@ -858,6 +918,252 @@ def main(test_proxy_type, test_proxy_timeout, test_proxy_with_request,
         
         # Execute all tasks concurrently
         await asyncio.gather(*[execute_task(task) for task in tasks])
+    
+    async def run_proxy_server_mode():
+        """Run HTTP proxy server mode"""
+        try:
+            from ..server.proxy_server import HTTPProxyServer
+        except ImportError:
+            click.echo("❌ Failed to import proxy server module")
+            click.echo("   Please ensure aiohttp and aiohttp-socks are installed")
+            return
+        
+        click.echo("🚀 Starting HTTP Proxy Server")
+        click.echo("=" * 50)
+        
+        # Check if we have any verified proxies
+        storage = ProxyStorage(proxy_storage)
+        available_proxies = storage.get_valid_proxies()
+        
+        if not available_proxies:
+            click.echo(f"❌ No verified proxy servers found in {proxy_storage}/")
+            click.echo("   Please run proxy validation first: --test-proxy-server <proxy_file>")
+            return
+        
+        click.echo(f"✅ Found {len(available_proxies)} verified proxy servers")
+        click.echo(f"🔄 Rotation mode: {proxy_server_rotation}")
+        click.echo(f"📡 Server will listen on {proxy_server_host}:{proxy_server_port}")
+        click.echo(f"📊 Stats endpoint: http://{proxy_server_host}:{proxy_server_port}/stats")
+        click.echo(f"🏥 Health endpoint: http://{proxy_server_host}:{proxy_server_port}/health")
+        click.echo("\n💡 Usage examples:")
+        click.echo(f"   curl --proxy http://{proxy_server_host}:{proxy_server_port} http://httpbin.org/ip")
+        click.echo(f"   export http_proxy=http://{proxy_server_host}:{proxy_server_port}")
+        click.echo(f"   export https_proxy=http://{proxy_server_host}:{proxy_server_port}")
+        
+        server = HTTPProxyServer(
+            host=proxy_server_host,
+            port=proxy_server_port,
+            storage_dir=proxy_storage,
+            rotation_mode=proxy_server_rotation.lower()
+        )
+        
+        await server.start()
+    
+    async def run_generate_config_mode():
+        """Generate default configuration file"""
+        click.echo("🚀 Generating default proxy server configuration")
+        click.echo("=" * 50)
+        
+        config_file = proxy_server_config
+        
+        if os.path.exists(config_file):
+            click.echo(f"⚠️  Configuration file {config_file} already exists")
+            if not click.confirm("Do you want to overwrite it?"):
+                click.echo("❌ Configuration generation cancelled")
+                return
+        
+        # Default configuration
+        default_config = {
+            "proxy_server": {
+                "host": proxy_server_host,
+                "port": proxy_server_port,
+                "workers": proxy_server_workers or multiprocessing.cpu_count(),
+                "worker_timeout": 30,
+                "request_timeout": 30,
+                "max_connections": 1000,
+                "keepalive_timeout": 60
+            },
+            "load_balancing": {
+                "strategy": proxy_server_strategy or "round_robin",
+                "strategies": {
+                    "round_robin": {
+                        "description": "Distribute requests evenly across all proxies"
+                    },
+                    "random": {
+                        "description": "Select a random proxy for each request"
+                    },
+                    "least_connections": {
+                        "description": "Route to proxy with fewest active connections",
+                        "track_connections": True
+                    },
+                    "weighted": {
+                        "description": "Route based on proxy weights",
+                        "default_weight": 1,
+                        "proxy_weights": {}
+                    },
+                    "response_time": {
+                        "description": "Route to proxy with best average response time",
+                        "window_size": 100,
+                        "prefer_faster": True
+                    },
+                    "fail_over": {
+                        "description": "Primary/backup proxy selection",
+                        "primary_proxies": [],
+                        "backup_proxies": []
+                    }
+                }
+            },
+            "health_checks": {
+                "enabled": True,
+                "interval": 30,
+                "timeout": 10,
+                "healthy_threshold": 2,
+                "unhealthy_threshold": 3,
+                "test_url": "http://httpbin.org/ip",
+                "max_retries": 3,
+                "failure_reset_time": 300,
+                "parallel_checks": 10
+            },
+            "circuit_breaker": {
+                "enabled": True,
+                "failure_threshold": 5,
+                "recovery_timeout": 60,
+                "half_open_max_calls": 3
+            },
+            "rate_limiting": {
+                "enabled": False,
+                "requests_per_minute": 100,
+                "burst_size": 20
+            },
+            "logging": {
+                "level": "DEBUG" if verbose else "INFO",
+                "file": "proxy_server.log",
+                "max_size": "10MB",
+                "backup_count": 5,
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            },
+            "monitoring": {
+                "metrics_enabled": True,
+                "stats_retention": 3600,
+                "detailed_timing": False
+            }
+        }
+        
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(default_config, f, indent=2)
+            
+            click.echo(f"✅ Configuration file generated: {config_file}")
+            click.echo(f"🔧 Default settings:")
+            click.echo(f"   Strategy: {default_config['load_balancing']['strategy']}")
+            click.echo(f"   Workers: {default_config['proxy_server']['workers']}")
+            click.echo(f"   Host: {default_config['proxy_server']['host']}")
+            click.echo(f"   Port: {default_config['proxy_server']['port']}")
+            click.echo(f"   Health checks: {'enabled' if default_config['health_checks']['enabled'] else 'disabled'}")
+            click.echo(f"   Circuit breaker: {'enabled' if default_config['circuit_breaker']['enabled'] else 'disabled'}")
+            click.echo("\n💡 Usage:")
+            click.echo(f"   proxy-fleet --enhanced-proxy-server --proxy-server-config {config_file}")
+            
+        except Exception as e:
+            click.echo(f"❌ Failed to generate configuration file: {e}")
+    
+    async def run_enhanced_proxy_server_mode():
+        """Run enhanced HTTP proxy server mode"""
+        try:
+            from ..server.enhanced_proxy_server import EnhancedHTTPProxyServer
+            import multiprocessing
+            import os
+        except ImportError as e:
+            click.echo("❌ Failed to import enhanced proxy server module")
+            click.echo(f"   Error: {e}")
+            click.echo("   Please ensure all required dependencies are installed:")
+            click.echo("   pip install aiohttp aiohttp-socks")
+            return
+        
+        click.echo("🚀 Starting Enhanced HTTP Proxy Server")
+        click.echo("=" * 50)
+        
+        # Check if we have any verified proxies
+        storage = ProxyStorage(proxy_storage)
+        available_proxies = storage.get_valid_proxies()
+        
+        if not available_proxies:
+            click.echo(f"❌ No verified proxy servers found in {proxy_storage}/")
+            click.echo("   Please run proxy validation first: --test-proxy-server <proxy_file>")
+            return
+        
+        click.echo(f"✅ Found {len(available_proxies)} verified proxy servers")
+        
+        # Load or check configuration
+        if not os.path.exists(proxy_server_config):
+            click.echo(f"⚠️  Configuration file {proxy_server_config} not found")
+            click.echo("   Generating default configuration...")
+            await run_generate_config_mode()
+        
+        try:
+            with open(proxy_server_config, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            click.echo(f"❌ Failed to load configuration file: {e}")
+            return
+        
+        # Override config with command line arguments
+        if proxy_server_host != '127.0.0.1':
+            config.setdefault('proxy_server', {})['host'] = proxy_server_host
+        if proxy_server_port != 8888:
+            config.setdefault('proxy_server', {})['port'] = proxy_server_port
+        if proxy_server_workers:
+            config.setdefault('proxy_server', {})['workers'] = proxy_server_workers
+        if proxy_server_strategy:
+            config.setdefault('load_balancing', {})['strategy'] = proxy_server_strategy
+        if verbose:
+            config.setdefault('logging', {})['level'] = 'DEBUG'
+        
+        # Display configuration summary
+        server_config = config.get('proxy_server', {})
+        lb_config = config.get('load_balancing', {})
+        health_config = config.get('health_checks', {})
+        
+        click.echo(f"🔧 Configuration:")
+        click.echo(f"   Load balancing strategy: {lb_config.get('strategy', 'round_robin')}")
+        click.echo(f"   Workers: {server_config.get('workers', multiprocessing.cpu_count())}")
+        click.echo(f"   Host: {server_config.get('host', '127.0.0.1')}")
+        click.echo(f"   Port: {server_config.get('port', 8888)}")
+        click.echo(f"   Health checks: {'enabled' if health_config.get('enabled', True) else 'disabled'}")
+        click.echo(f"   Circuit breaker: {'enabled' if config.get('circuit_breaker', {}).get('enabled', True) else 'disabled'}")
+        click.echo(f"   Single process mode: {'yes' if single_process else 'no'}")
+        
+        host = server_config.get('host', '127.0.0.1')
+        port = server_config.get('port', 8888)
+        
+        click.echo(f"📡 Server endpoints:")
+        click.echo(f"   Proxy: http://{host}:{port}")
+        click.echo(f"   Stats: http://{host}:{port}/stats")
+        click.echo(f"   Health: http://{host}:{port}/health")
+        
+        click.echo("\n💡 Usage examples:")
+        click.echo(f"   curl --proxy http://{host}:{port} http://httpbin.org/ip")
+        click.echo(f"   export http_proxy=http://{host}:{port}")
+        click.echo(f"   export https_proxy=http://{host}:{port}")
+        
+        # Create and start server
+        server = EnhancedHTTPProxyServer()
+        server.config = config
+        server.server_config = server_config
+        server.host = host
+        server.port = port
+        server.workers = server_config.get('workers', multiprocessing.cpu_count())
+        
+        if single_process:
+            click.echo("\n🔧 Running in single process mode (development)")
+            await server.start_worker()
+        else:
+            click.echo(f"\n🚀 Starting {server.workers} worker processes...")
+            server.start_multiprocess()
+    
+    # Add import for multiprocessing and os at the top level
+    import multiprocessing
+    import os
     
     try:
         asyncio.run(run_proxy_fleet())
