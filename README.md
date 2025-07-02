@@ -34,40 +34,34 @@ A production-ready Python proxy server and pool manager with intelligent load ba
 
 ## 🌐 Proxy Protocols Overview
 
-proxy-fleet supports multiple proxy protocols, each with distinct characteristics and use cases. Understanding these differences helps you choose the right proxy type for your specific requirements.
+proxy-fleet supports multiple proxy protocols. Here's a comprehensive comparison and selection guide:
 
-### Protocol Comparison
+### Protocol Comparison Table
 
-| Feature | HTTP Proxy | SOCKS4 | SOCKS5 |
-|---------|------------|---------|---------|
-| **Protocol Layer** | Application Layer (Layer 7) | Session Layer (Layer 5) | Session Layer (Layer 5) |
-| **Supported Protocols** | HTTP/HTTPS only | TCP connections | TCP/UDP connections |
-| **Authentication** | Basic authentication | No authentication | Multiple auth methods |
-| **IPv6 Support** | Yes | No | Yes |
-| **DNS Resolution** | Client or proxy side | Client side only | Can be done on proxy side |
-| **Connection Speed** | Slower (HTTP parsing overhead) | Faster | Fast |
-| **Security** | Can inspect/modify content | Basic forwarding | More secure, encrypted auth |
-| **Complexity** | Simple | Simple | Medium |
+| Protocol | Layer | Traffic Support | Auth | IPv6 | DNS Resolution | Speed | Security | Complexity |
+|----------|-------|-----------------|------|------|----------------|-------|----------|------------|
+| HTTP     | Application | HTTP/HTTPS | Basic/Digest | Yes  | Client/Proxy | Slower (parsing overhead) | Content inspection/modification | Simple |
+| SOCKS4   | Session | TCP only | None | No   | Client | Fast | Basic forwarding | Simple |
+| SOCKS5   | Session | TCP/UDP | Multiple | Yes  | Proxy | Fast | Encrypted auth support | Medium |
 
-### Protocol Details
+### Protocol Use Cases & Recommendations
 
-#### **HTTP Proxy**
-- **Best for**: Web browsing, API requests, HTTP-based applications
-- **Advantages**: Content filtering, caching, easy debugging
-- **Disadvantages**: Limited to HTTP/HTTPS protocols
-- **Security**: Can inspect and modify HTTP traffic
+- **HTTP Proxy**: Ideal for web scraping, API requests, content filtering/caching/debugging applications.
+- **SOCKS4**: Perfect for simple TCP applications, legacy systems, IPv4-only environments, ultra-low latency requirements.
+- **SOCKS5**: Best for modern applications, gaming, VoIP, scenarios requiring UDP/IPv6/authentication/remote DNS.
 
-#### **SOCKS4**
-- **Best for**: Simple TCP applications, legacy systems
-- **Advantages**: Lightweight, fast, universal TCP support
-- **Disadvantages**: No authentication, IPv4 only, no UDP support
-- **Security**: Basic TCP tunneling without inspection
+### When to Choose Which Protocol
 
-#### **SOCKS5**
-- **Best for**: Modern applications, gaming, VoIP, comprehensive proxy needs
-- **Advantages**: Full protocol support, authentication, IPv6, remote DNS
-- **Disadvantages**: Slightly more complex setup
-- **Security**: Support for various authentication methods
+- **Web Scraping**: HTTP Proxy (HTTP-only traffic) or SOCKS5 (additional protocols/privacy needed)
+- **Gaming**: SOCKS5 (UDP support), SOCKS4 (TCP-only games)
+- **Privacy/Security**: SOCKS5 (remote DNS, prevents DNS leaks), HTTP Proxy (not recommended, content inspection)
+- **Enterprise/Filtering**: HTTP Proxy (content filtering/monitoring), SOCKS5 (secure authentication)
+- **High Performance**: SOCKS4 (minimal overhead), SOCKS5 (feature-performance balance)
+
+### Real-World Examples
+- **HTTP Proxy**: Corporate network filtering, web crawlers, CDN caching
+- **SOCKS4**: Legacy games, enterprise internal TCP tunneling
+- **SOCKS5**: VPN services, P2P applications, modern gaming, BitTorrent
 
 ### proxy-fleet Support
 
@@ -92,7 +86,7 @@ proxy-fleet --enhanced-proxy-server --proxy-server-port 8888
 
 # Use proxy-fleet as HTTP proxy
 curl --proxy http://127.0.0.1:8888 http://httpbin.org/ip
-curl -x http://127.0.0.1:8888 https://ipinfo.io/json
+curl -x http://127.0.0.1:8888 https://httpbin.org/ip
 
 # With verbose output
 curl -v --proxy http://127.0.0.1:8888 http://httpbin.org/get
@@ -145,185 +139,7 @@ curl -v --proxy http://proxy:port http://example.com
 curl --proxy http://proxy:port --connect-timeout 30 http://example.com
 ```
 
-### Choosing the Right Protocol
-
-**Use HTTP Proxy when:**
-- You need content filtering or caching
-- Working primarily with web applications
-- Debugging HTTP traffic is important
-- You need application-layer features
-
-**Use SOCKS4 when:**
-- You need simple TCP tunneling
-- Working with legacy applications
-- IPv4 is sufficient for your needs
-- Minimal overhead is important
-
-**Use SOCKS5 when:**
-- You need comprehensive protocol support
-- Working with modern applications
-- IPv6 support is required
-- Authentication is necessary
-- You need UDP support (gaming, VoIP)
-
-proxy-fleet intelligently handles all these proxy types, providing a unified interface for managing diverse proxy infrastructure while maintaining optimal performance for each protocol type.
-
-## � Proxy Protocols Deep Dive
-
-Understanding the differences between proxy protocols helps you make informed decisions for your specific use cases. Here's a comprehensive comparison:
-
-### Protocol Characteristics Comparison
-
-| Aspect | HTTP Proxy | SOCKS4 | SOCKS5 |
-|--------|------------|---------|---------|
-| **Protocol Layer** | Application Layer (Layer 7) | Session Layer (Layer 5) | Session Layer (Layer 5) |
-| **Supported Traffic** | HTTP/HTTPS only | TCP connections | TCP/UDP connections |
-| **Authentication** | Basic/Digest auth | No authentication | Multiple auth methods |
-| **IPv6 Support** | Yes | No (IPv4 only) | Yes |
-| **DNS Resolution** | Client or proxy side | Client side only | Proxy side (remote DNS) |
-| **Performance** | Slower (HTTP overhead) | Fast | Fast |
-| **Security Level** | Can inspect content | Basic tunneling | Encrypted auth options |
-| **Setup Complexity** | Simple | Simple | Medium |
-| **Firewall Traversal** | Excellent | Good | Good |
-
-### When to Use Each Protocol
-
-#### **HTTP Proxy** 🌐
-**Best for:**
-- Web scraping and crawling
-- API requests and HTTP-based applications
-- Content filtering and caching scenarios
-- Debugging HTTP traffic
-
-**Advantages:**
-- Easy to implement and debug
-- Content filtering capabilities
-- Caching support
-- Works well with web browsers
-
-**Disadvantages:**
-- Limited to HTTP/HTTPS protocols
-- Higher overhead due to HTTP parsing
-- Can inspect and modify your traffic
-
-**Real-world examples:**
-- Corporate web filtering
-- Web scraping services
-- CDN and caching proxies
-
-#### **SOCKS4** ⚡
-**Best for:**
-- Legacy applications
-- Simple TCP applications
-- Scenarios where speed is critical
-- IPv4-only environments
-
-**Advantages:**
-- Lightweight and fast
-- Universal TCP support
-- Low overhead
-- Simple protocol
-
-**Disadvantages:**
-- No authentication support
-- IPv4 only
-- No UDP support
-- Client-side DNS resolution only
-
-**Real-world examples:**
-- Gaming applications (TCP-based)
-- Legacy enterprise software
-- Simple TCP tunneling
-
-#### **SOCKS5** 🚀
-**Best for:**
-- Modern applications requiring full protocol support
-- Gaming and real-time applications (UDP support)
-- VoIP and video streaming
-- Security-conscious applications
-
-**Advantages:**
-- Full protocol support (TCP/UDP)
-- Multiple authentication methods
-- IPv6 support
-- Remote DNS resolution (privacy benefit)
-- Most versatile option
-
-**Disadvantages:**
-- Slightly more complex setup
-- Higher overhead than SOCKS4
-- May require authentication configuration
-
-**Real-world examples:**
-- VPN-like applications
-- Gaming and P2P software
-- Modern secure applications
-- Torrent clients
-
-### Technical Implementation Notes
-
-#### **proxy-fleet's Protocol Handling**
-
-**As a Server (What proxy-fleet provides):**
-- ✅ **HTTP Proxy Server**: proxy-fleet runs as an HTTP proxy server
-- ✅ **Intelligent Load Balancing**: Distributes requests across upstream proxies
-- ✅ **Multi-protocol Upstream Support**: Can route through HTTP, SOCKS4, or SOCKS5 upstream proxies
-
-**As a Client (What proxy-fleet connects to):**
-- ✅ **HTTP Upstream**: Connect through HTTP proxies in your pool
-- ✅ **SOCKS4 Upstream**: Connect through SOCKS4 proxies in your pool  
-- ✅ **SOCKS5 Upstream**: Connect through SOCKS5 proxies in your pool
-- ✅ **Mixed Pools**: Handle all three types in the same proxy pool
-
-**Example Architecture:**
-```
-Your App → proxy-fleet (HTTP Proxy) → Upstream Proxy Pool
-                                      ├── HTTP Proxy 1
-                                      ├── SOCKS4 Proxy 2  
-                                      ├── SOCKS5 Proxy 3
-                                      └── HTTP Proxy 4
-```
-
-### Performance Considerations
-
-#### **Latency Ranking** (Fastest to Slowest)
-1. **SOCKS4** - Minimal overhead, no authentication
-2. **SOCKS5** - Low overhead, optional authentication
-3. **HTTP Proxy** - Higher overhead due to HTTP parsing
-
-#### **Feature Ranking** (Most to Least Features)
-1. **SOCKS5** - Full protocol support, authentication, IPv6
-2. **HTTP Proxy** - Content inspection, caching, filtering
-3. **SOCKS4** - Basic TCP tunneling only
-
-#### **Security Ranking** (Most to Least Secure)
-1. **SOCKS5** - Encrypted authentication, remote DNS
-2. **HTTP Proxy** - Can inspect traffic (pro/con depending on use case)
-3. **SOCKS4** - No authentication, basic tunneling
-
-### Choosing the Right Protocol for Your Use Case
-
-**For Web Scraping:**
-- **HTTP Proxy** - Best choice for HTTP-only traffic
-- **SOCKS5** - If you need additional protocols or privacy
-
-**For Gaming:**
-- **SOCKS5** - UDP support for real-time games
-- **SOCKS4** - For TCP-only games where speed matters
-
-**For Privacy/Security:**
-- **SOCKS5** - Remote DNS resolution prevents DNS leaks
-- **HTTP Proxy** - Avoid if you don't want traffic inspection
-
-**For Enterprise:**
-- **HTTP Proxy** - Content filtering and monitoring
-- **SOCKS5** - Secure authenticated access
-
-**For High Performance:**
-- **SOCKS4** - Minimal overhead for TCP traffic
-- **SOCKS5** - Good balance of features and performance
-
-## �🚀 Quick Start
+## 🚀 Quick Start
 
 ### Installation
 
@@ -540,7 +356,7 @@ proxy-fleet --enhanced-proxy-server --proxy-server-port 8888
 
 # 2. When needed, validate proxy health in a separate terminal
 # This updates the proxy storage with fresh health data
-proxy-fleet --test-proxy-storage --test-proxy-with-request 'https://ipinfo.io/json'
+proxy-fleet --test-proxy-storage --test-proxy-with-request 'https://httpbin.org/ip'
 
 # 3. Force the running server to reload from updated storage
 curl "http://127.0.0.1:8888/refresh?health_check=true"
@@ -570,22 +386,6 @@ For minimal automated monitoring without overloading external services:
   - **SOCKS4/SOCKS5 proxies**: Use raw socket handshake validation (fast and reliable)
   - **HTTP proxies**: Use HTTP request validation with the configured test_url
 - Use the `/refresh` API for immediate updates when needed
-For scheduled proxy validation and hot-reload:
-
-```bash
-# 1. Start the enhanced proxy server
-proxy-fleet --enhanced-proxy-server --proxy-server-port 8888
-
-# 2. In a separate terminal, validate proxy health (every 12 hours)
-# This updates the proxy storage with fresh health data
-proxy-fleet --test-proxy-storage --test-proxy-with-request 'https://ipinfo.io/json'
-
-# 3. Force the running server to reload from updated storage
-curl "http://127.0.0.1:8888/refresh?health_check=true"
-
-# 4. Verify the refresh worked
-curl http://127.0.0.1:8888/stats | jq .rotator_stats
-```
 
 #### Automated Refresh Script
 Create a controlled refresh script for periodic validation:
@@ -846,10 +646,9 @@ proxy-fleet/
 │       ├── config.py       # Configuration models
 │       └── task.py         # Task models
 ├── tests/                  # Test suite
-│   ├── test_main.py                 # CLI and storage tests
-│   ├── test_integration.py          # Integration tests
-│   ├── test_proxy_functionality.py  # Core functionality tests
-│   └── test_socks_validation.py     # SOCKS validation tests
+│   ├── test_core.py                 # Core functionality tests
+│   ├── integration_test_script.py   # Integration tests
+│   └── manual_socks_test_script.py  # SOCKS validation tests
 ├── examples/               # Usage examples
 ├── proxy/                  # Default proxy storage directory
 └── proxy_server_config.json        # Default configuration file
@@ -1010,8 +809,8 @@ The project includes comprehensive test coverage:
 python dev.py test
 
 # Run specific test categories
-pytest tests/test_proxy_functionality.py -v
-pytest tests/test_integration.py -v
+pytest tests/test_core.py -v
+pytest tests/integration_test_script.py -v
 ```
 
 ## 📄 License
