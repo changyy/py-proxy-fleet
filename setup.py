@@ -18,10 +18,10 @@ def get_long_description():
         return content
     except FileNotFoundError:
         print("Warning: README.md not found, using short description")
-        return "A high-performance Python library for managing concurrent HTTP requests through multiple proxy servers"
+        return "A production-ready proxy server with intelligent load balancing and health monitoring"
     except Exception as e:
         print(f"Warning: Could not read README.md: {e}")
-        return "A high-performance Python library for managing concurrent HTTP requests through multiple proxy servers"
+        return "A production-ready proxy server with intelligent load balancing and health monitoring"
 
 long_description = get_long_description()
 
@@ -40,10 +40,9 @@ setup(
     version=get_version(),
     author="changyy",
     author_email="changyy.csie@gmail.com",
-    description="A high-performance Python library for managing concurrent HTTP requests through multiple proxy servers",
+    description="A production-ready proxy server with intelligent load balancing and health monitoring",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    license="MIT",
     url="https://github.com/changyy/py-proxy-fleet",
     project_urls={
         "Bug Reports": "https://github.com/changyy/py-proxy-fleet/issues",
@@ -51,11 +50,15 @@ setup(
         "Documentation": "https://github.com/changyy/py-proxy-fleet/blob/main/docs/README.md",
     },
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
-        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Intended Audience :: System Administrators", 
+        "Topic :: Internet :: Proxy Servers",
         "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
         "Topic :: System :: Networking",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
@@ -63,21 +66,21 @@ setup(
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Operating System :: OS Independent",
+        "Environment :: Console",
+        "Framework :: AsyncIO",
     ],
     keywords=[
-        "proxy", "http", "requests", "concurrent", "parallel",
-        "proxy-manager", "health-check", "failover", "rotation",
-        "web-scraping", "crawler", "networking", "async"
+        "proxy", "proxy-server", "load-balancer", "haproxy", "nginx",
+        "health-check", "failover", "rotation", "socks", "http-proxy",
+        "networking", "async", "aiohttp", "monitoring", "graceful-shutdown"
     ],
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=[
-        "aiohttp>=3.8.0",
-        "aiohttp-socks>=0.7.0",
-        "aiofiles>=0.8.0",
-        "click>=8.0.0",
-        "pydantic>=1.10.0",
-        "rich>=12.0.0", 
+        "aiohttp>=3.8.0,<4.0.0",
+        "aiohttp-socks>=0.7.0,<1.0.0", 
+        "click>=8.0.0,<9.0.0",
+        "pydantic>=2.0.0,<3.0.0",
     ],
     extras_require={
         "dev": [
@@ -85,8 +88,30 @@ setup(
             "pytest-asyncio>=0.21.0",
             "pytest-cov>=4.0.0",
             "black>=22.0.0",
+            "isort>=5.0.0",
             "flake8>=5.0.0",
             "mypy>=0.991",
+            "pre-commit>=2.20.0",
+        ],
+        "test": [
+            "pytest>=7.0.0", 
+            "pytest-asyncio>=0.21.0",
+            "pytest-cov>=4.0.0",
+        ],
+        "monitoring": [
+            "prometheus-client>=0.14.0",
+            "psutil>=5.9.0",
+        ],
+        "all": [
+            "pytest>=7.0.0",
+            "pytest-asyncio>=0.21.0", 
+            "pytest-cov>=4.0.0",
+            "black>=22.0.0",
+            "flake8>=5.0.0",
+            "mypy>=0.991",
+            "pre-commit>=2.20.0",
+            "prometheus-client>=0.14.0",
+            "psutil>=5.9.0",
         ],
     },
     entry_points={

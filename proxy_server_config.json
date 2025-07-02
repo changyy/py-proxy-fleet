@@ -1,75 +1,84 @@
 {
-    "proxy_server": {
-        "host": "127.0.0.1",
-        "port": 8888,
-        "workers": 4,
-        "worker_timeout": 30,
-        "request_timeout": 30,
-        "max_connections": 1000,
-        "keepalive_timeout": 60
-    },
-    "load_balancing": {
-        "strategy": "round_robin",
-        "strategies": {
-            "round_robin": {
-                "description": "Distribute requests evenly across all proxies"
-            },
-            "random": {
-                "description": "Select a random proxy for each request"
-            },
-            "least_connections": {
-                "description": "Route to proxy with fewest active connections",
-                "track_connections": true
-            },
-            "weighted": {
-                "description": "Route based on proxy weights",
-                "default_weight": 1,
-                "proxy_weights": {}
-            },
-            "response_time": {
-                "description": "Route to proxy with best average response time",
-                "window_size": 100,
-                "prefer_faster": true
-            },
-            "fail_over": {
-                "description": "Primary/backup proxy selection",
-                "primary_proxies": [],
-                "backup_proxies": []
-            }
-        }
-    },
-    "health_checks": {
-        "enabled": true,
-        "interval": 30,
-        "timeout": 10,
-        "healthy_threshold": 2,
-        "unhealthy_threshold": 3,
-        "test_url": "http://httpbin.org/ip",
-        "max_retries": 3,
-        "failure_reset_time": 300,
-        "parallel_checks": 10
-    },
-    "circuit_breaker": {
-        "enabled": true,
-        "failure_threshold": 5,
-        "recovery_timeout": 60,
-        "half_open_max_calls": 3
-    },
-    "rate_limiting": {
-        "enabled": false,
-        "requests_per_minute": 100,
-        "burst_size": 20
-    },
-    "logging": {
-        "level": "INFO",
-        "file": "proxy_server.log",
-        "max_size": "10MB",
-        "backup_count": 5,
-        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    },
-    "monitoring": {
-        "metrics_enabled": true,
-        "stats_retention": 3600,
-        "detailed_timing": false
+  "proxy_server": {
+    "host": "127.0.0.1",
+    "port": 8888,
+    "workers": 8,
+    "worker_timeout": 30,
+    "request_timeout": 30,
+    "max_connections": 1000,
+    "keepalive_timeout": 60,
+    "use_types": [
+      "all"
+    ],
+    "use_regions": [
+      "TW",
+      "US",
+      "JP"
+    ],
+    "skip_cert_check": true
+  },
+  "load_balancing": {
+    "strategy": "round_robin",
+    "strategies": {
+      "round_robin": {
+        "description": "Distribute requests evenly across all proxies"
+      },
+      "random": {
+        "description": "Select a random proxy for each request"
+      },
+      "least_connections": {
+        "description": "Route to proxy with fewest active connections",
+        "track_connections": true
+      },
+      "weighted": {
+        "description": "Route based on proxy weights",
+        "default_weight": 1,
+        "proxy_weights": {}
+      },
+      "response_time": {
+        "description": "Route to proxy with best average response time",
+        "window_size": 100,
+        "prefer_faster": true
+      },
+      "fail_over": {
+        "description": "Primary/backup proxy selection",
+        "primary_proxies": [],
+        "backup_proxies": []
+      }
     }
+  },
+  "health_checks": {
+    "enabled": true,
+    "interval": 86400,
+    "timeout": 15,
+    "healthy_threshold": 2,
+    "unhealthy_threshold": 5,
+    "test_url": "http://httpbin.org/ip",
+    "max_retries": 3,
+    "failure_reset_time": 300,
+    "parallel_checks": 5
+  },
+  "circuit_breaker": {
+    "enabled": true,
+    "failure_threshold": 5,
+    "recovery_timeout": 60,
+    "half_open_max_calls": 3
+  },
+  "rate_limiting": {
+    "enabled": false,
+    "requests_per_minute": 100,
+    "burst_size": 20
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "proxy_server.log",
+    "max_size": "10MB",
+    "backup_count": 5,
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  },
+  "monitoring": {
+    "metrics_enabled": true,
+    "stats_retention": 3600,
+    "detailed_timing": false
+  }
 }

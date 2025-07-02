@@ -1,0 +1,40 @@
+{
+  "proxy_server": {
+    "host": "127.0.0.1",
+    "port": 8888,
+    "workers": 4,
+    "graceful_shutdown_timeout": 30,
+    "access_log": true
+  },
+  "load_balancing": {
+    "strategy": "least_connections",
+    "strategies": {
+      "weighted": {
+        "proxy_weights": {}
+      },
+      "fail_over": {
+        "primary_proxies": [],
+        "backup_proxies": []
+      }
+    }
+  },
+  "health_checks": {
+    "enabled": true,
+    "interval": 86400,
+    "timeout": 15,
+    "max_failures": 5,
+    "parallel_checks": 5,
+    "test_url": "http://httpbin.org/ip"
+  },
+  "circuit_breaker": {
+    "enabled": true,
+    "failure_threshold": 5,
+    "recovery_timeout": 300,
+    "half_open_max_calls": 3
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "detailed",
+    "file": null
+  }
+}

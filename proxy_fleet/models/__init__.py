@@ -2,13 +2,13 @@
 Models package initialization.
 """
 
-from .proxy import ProxyServer, ProxyStatus, ProxyProtocol
-from .task import HttpTask, TaskResult, TaskStatus, HttpMethod
 from .config import FleetConfig
+from .proxy import ProxyProtocol, ProxyServer, ProxyStatus
+from .task import HttpMethod, HttpTask, TaskResult, TaskStatus
 
 __all__ = [
     "ProxyServer",
-    "ProxyStatus", 
+    "ProxyStatus",
     "ProxyProtocol",
     "HttpTask",
     "TaskResult",
