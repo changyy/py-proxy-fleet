@@ -167,8 +167,19 @@ class ProxyStorage:
 
                 # Check region filter
                 if regions:
-                    ip_info = proxy_data.get("ip_info", {})
-                    proxy_region = ip_info.get("country", "").upper() if ip_info else ""
+                    proxy_region = ""
+                    
+                    # First try to get region from request_test_result (custom API)
+                    request_test = proxy_data.get("request_test_result", {})
+                    location_info = request_test.get("location_info")
+                    if location_info and location_info.get("location"):
+                        proxy_region = location_info["location"].upper()
+                    
+                    # Fallback to ip_info (from automatic ipinfo.io check)
+                    if not proxy_region:
+                        ip_info = proxy_data.get("ip_info", {})
+                        proxy_region = ip_info.get("country", "").upper() if ip_info else ""
+                    
                     if proxy_region not in regions:
                         continue
 
@@ -307,6 +318,12 @@ def parse_proxy_line(line: str) -> Optional[Dict[str, Any]]:
     help="Proxy state storage directory for logging test results and statistics (default: proxy)",
 )
 @click.option(
+    "--list-proxy-types",
+    is_flag=True,
+    default=False,
+    help="List proxy type statistics from storage in JSON format",
+)
+@click.option(
     "--list-proxy",
     is_flag=True,
     default=False,
@@ -405,12 +422,6 @@ def parse_proxy_line(line: str) -> Optional[Dict[str, Any]]:
     "--proxy-server-use-types",
     default="socks5",
     help="Proxy types to use in server: all, socks5, socks4, http (comma-separated, default: socks5)",
-)
-@click.option(
-    "--list-proxy-types",
-    is_flag=True,
-    default=False,
-    help="List proxy type statistics from storage in JSON format",
 )
 @click.option(
     "--proxy-server-skip-cert-check",
@@ -769,8 +780,15 @@ def main(
         # Import asyncio explicitly to avoid scoping issues
         import asyncio
         
-        # Initialize validator
-        validator = SocksValidator(timeout=test_proxy_timeout, check_ip_info=True)
+        # Initialize validator - use new server request validation if test URL provided
+        if test_proxy_with_request:
+            validator = SocksValidator(
+                timeout=test_proxy_timeout, 
+                check_server_via_request=True,
+                request_url=test_proxy_with_request
+            )
+        else:
+            validator = SocksValidator(timeout=test_proxy_timeout)
         valid_proxies = []
 
         # Use concurrency control to validate proxies
@@ -836,103 +854,25 @@ def main(
                             )
 
                             if result.is_valid:
-                                # Additional HTTP request validation
-                                http_success = True
+                                # Extract server response data if available
                                 http_response_data = None
-                                if test_proxy_with_request:
-                                    try:
-                                        import aiohttp
-                                        from aiohttp_socks import (
-                                            ProxyConnector, ProxyType)
+                                if result.ip_info and isinstance(result.ip_info, dict):
+                                    # The ip_info now contains the server response data
+                                    http_response_data = result.ip_info
 
-                                        # Choose connector based on proxy type
-                                        if test_proxy_type.lower() in [
-                                            "socks4",
-                                            "socks5",
-                                        ]:
-                                            proxy_type = (
-                                                ProxyType.SOCKS5
-                                                if test_proxy_type.lower() == "socks5"
-                                                else ProxyType.SOCKS4
-                                            )
-                                            connector = ProxyConnector(
-                                                proxy_type=proxy_type,
-                                                host=host,
-                                                port=port,
-                                            )
-                                            session_kwargs = {"connector": connector}
-                                        else:  # http proxy
-                                            connector = aiohttp.TCPConnector()
-                                            session_kwargs = {
-                                                "connector": connector,
-                                                "proxy": f"http://{host}:{port}",
-                                            }
-
-                                        async with aiohttp.ClientSession(
-                                            timeout=aiohttp.ClientTimeout(
-                                                total=test_proxy_timeout
-                                            ),
-                                            **session_kwargs,
-                                        ) as session:
-                                            async with session.get(
-                                                test_proxy_with_request
-                                            ) as response:
-                                                response_text = await response.text()
-                                                http_success = response.status in [
-                                                    200,
-                                                    301,
-                                                    302,
-                                                ]
-
-                                                # Store HTTP request test result
-                                                http_response_data = {
-                                                    "url": test_proxy_with_request,
-                                                    "status_code": response.status,
-                                                    "success": http_success,
-                                                    "response_body": (
-                                                        response_text[:500]
-                                                        if response_text
-                                                        else None
-                                                    ),  # Limit to 500 chars
-                                                    "headers": dict(response.headers),
-                                                }
-                                    except Exception as e:
-                                        http_success = False
-                                        http_response_data = {
-                                            "url": test_proxy_with_request,
-                                            "success": False,
-                                            "error": str(e),
-                                        }
-
-                                # If no additional HTTP validation required, or HTTP validation successful, consider proxy valid
-                                if not test_proxy_with_request or http_success:
-                                    storage.update_proxy_status(
-                                        host,
-                                        port,
-                                        True,
-                                        result.ip_info,
-                                        test_proxy_type.lower(),
-                                        http_response_data,
-                                    )
-                                    return {
-                                        "proxy": proxy,
-                                        "result": result,
-                                        "http_success": http_success,
-                                    }
-                                else:
-                                    storage.update_proxy_status(
-                                        host,
-                                        port,
-                                        False,
-                                        result.ip_info,
-                                        test_proxy_type.lower(),
-                                        http_response_data,
-                                    )
-                                    return {
-                                        "proxy": proxy,
-                                        "result": result,
-                                        "http_success": http_success,
-                                    }
+                                storage.update_proxy_status(
+                                    host,
+                                    port,
+                                    True,
+                                    None,  # No separate ip_info
+                                    test_proxy_type.lower(),
+                                    http_response_data,
+                                )
+                                return {
+                                    "proxy": proxy,
+                                    "result": result,
+                                    "http_success": True,
+                                }
                             else:
                                 storage.update_proxy_status(
                                     host,
@@ -943,7 +883,7 @@ def main(
                                 return {
                                     "proxy": proxy,
                                     "result": result,
-                                    "http_success": None,
+                                    "http_success": False,
                                 }
 
                         except asyncio.TimeoutError:
@@ -1060,19 +1000,31 @@ def main(
             host, port = proxy["host"], proxy["port"]
 
             if not error and result and result.is_valid:
-                if not test_proxy_with_request or http_success:
-                    valid_proxies.append(proxy)
-                    valid_count += 1
-                    # Only show valid proxies to reduce noise
-                    proxy_type_name = test_proxy_type.upper()
-                    click.echo(f"✅ {host}:{port} - {proxy_type_name} validation successful")
+                valid_proxies.append(proxy)
+                valid_count += 1
+                # Only show valid proxies to reduce noise
+                proxy_type_name = test_proxy_type.upper()
+                click.echo(f"✅ {host}:{port} - {proxy_type_name} validation successful")
+                
+                # Check if we have server response data from the validator
+                if result.ip_info and isinstance(result.ip_info, dict):
+                    server_response = result.ip_info
+                    location_info = server_response.get("location_info")
                     
-                    if result.ip_info:
-                        ip = result.ip_info.get("ip", "Unknown")
-                        country = result.ip_info.get("country", "Unknown")
-                        click.echo(f"   🌐 IP: {ip} ({country})")
+                    if location_info:
+                        location = location_info.get("location", "Unknown")
+                        source_field = location_info.get("source_field", "unknown")
+                        ip = location_info.get("ip", "Unknown")
+                        status_code = server_response.get("status_code", "Unknown")
+                        click.echo(f"   🌐 IP: {ip} (Location: {location} from {source_field}) - Server: {status_code}")
+                    else:
+                        # Show basic server response info
+                        status_code = server_response.get("status_code", "Unknown")
+                        url = server_response.get("url", "Unknown")
+                        click.echo(f"   🌐 Server test: {url} -> {status_code}")
                 else:
-                    failed_count += 1
+                    # No additional server test was performed
+                    click.echo(f"   ✅ Basic protocol validation only")
             else:
                 failed_count += 1
                 

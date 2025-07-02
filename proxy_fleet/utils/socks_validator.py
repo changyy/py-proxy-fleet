@@ -63,16 +63,28 @@ class ValidationResult:
 class SocksValidator:
     """Validates SOCKS proxies using raw socket handshake"""
 
-    def __init__(self, timeout: float = 10.0, check_ip_info: bool = True):
+    def __init__(
+        self, 
+        timeout: float = 10.0, 
+        check_server_via_request: bool = False,
+        request_url: Optional[str] = None
+    ):
         """
         Initialize SOCKS validator
 
         Args:
             timeout: Connection timeout in seconds
-            check_ip_info: Whether to query ipinfo.io after successful validation
+            check_server_via_request: Whether to do additional HTTP request validation
+            request_url: URL to test with for HTTP request validation. If provided and 
+                        check_server_via_request is True, the proxy is only considered 
+                        valid if this URL returns 2XX or 3XX status codes
         """
         self.timeout = timeout
-        self.check_ip_info = check_ip_info
+        self.check_server_via_request = check_server_via_request
+        self.request_url = request_url
+        
+        # For backward compatibility, keep the old parameter name
+        self.check_ip_info = check_server_via_request and request_url is not None
 
     async def validate_proxy(self, proxy_string: str) -> ValidationResult:
         """
@@ -123,51 +135,107 @@ class SocksValidator:
         except Exception as e:
             return ValidationResult(False, error=f"Validation error: {str(e)}")
 
-    async def check_ip_info_via_proxy(
+    async def check_server_via_proxy(
         self, host: str, port: int, protocol: str = "socks5"
     ) -> Optional[Dict[str, Any]]:
         """
-        通過 SOCKS 代理查詢 ipinfo.io 獲取 IP 信息
+        通過代理查詢指定 URL 獲取回應信息
 
         Args:
-            host: SOCKS proxy host
-            port: SOCKS proxy port
-            protocol: SOCKS protocol ('socks4' or 'socks5')
+            host: Proxy host
+            port: Proxy port
+            protocol: Proxy protocol ('socks4', 'socks5', or 'http')
 
         Returns:
-            IP 信息字典或 None（如果失敗）
+            HTTP 回應信息字典或 None（如果失敗或狀態碼不是 2XX/3XX）
         """
+        if not self.request_url:
+            return None
+            
         try:
-            # 使用 aiohttp-socks 通過代理發送 HTTP 請求
             import aiohttp
-            from aiohttp_socks import ProxyConnector, ProxyType
 
-            # 選擇代理類型
-            proxy_type = ProxyType.SOCKS5 if protocol == "socks5" else ProxyType.SOCKS4
-
-            connector = ProxyConnector(proxy_type=proxy_type, host=host, port=port)
+            # 根據代理類型選擇不同的連接方式
+            if protocol in ["socks4", "socks5"]:
+                # 使用 aiohttp-socks 處理 SOCKS 代理
+                from aiohttp_socks import ProxyConnector, ProxyType
+                
+                proxy_type = ProxyType.SOCKS5 if protocol == "socks5" else ProxyType.SOCKS4
+                connector = ProxyConnector(proxy_type=proxy_type, host=host, port=port)
+                session_kwargs = {"connector": connector}
+                
+            elif protocol == "http":
+                # 使用標準 HTTP 代理
+                connector = aiohttp.TCPConnector()
+                proxy_url = f"http://{host}:{port}"
+                session_kwargs = {
+                    "connector": connector,
+                    "proxy": proxy_url
+                }
+                
+            else:
+                logger.warning(f"Unsupported proxy protocol: {protocol}")
+                return None
 
             async with aiohttp.ClientSession(
-                connector=connector, timeout=aiohttp.ClientTimeout(total=self.timeout)
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+                **session_kwargs
             ) as session:
-                async with session.get("https://ipinfo.io/json") as response:
-                    if response.status == 200:
-                        data = await response.json()
+                async with session.get(self.request_url) as response:
+                    # 只有 2XX 或 3XX 狀態碼才視為成功
+                    is_success = 200 <= response.status < 400
+                    
+                    response_text = await response.text()
+                    
+                    result = {
+                        "url": self.request_url,
+                        "status_code": response.status,
+                        "success": is_success,
+                        "response_body": response_text[:1024] if response_text else None,
+                        "headers": dict(response.headers)
+                    }
+                    
+                    # 嘗試解析 JSON 並提取位置信息
+                    if is_success and response_text:
+                        try:
+                            response_json = json.loads(response_text)
+                            # 優先使用 country，回退到 region
+                            location = response_json.get('country')
+                            if not location:
+                                location = response_json.get('region')
+                            
+                            if location:
+                                result["location_info"] = {
+                                    'location': location,
+                                    'source_field': 'country' if 'country' in response_json else 'region',
+                                    'ip': response_json.get('ip'),
+                                    'full_response': response_json
+                                }
+                        except json.JSONDecodeError:
+                            # 如果不是 JSON 格式，不影響成功狀態
+                            pass
+                    
+                    if is_success:
                         logger.debug(
-                            f"IP info via {host}:{port}: {data.get('ip')} ({data.get('country')})"
+                            f"HTTP test via {protocol.upper()} {host}:{port} -> {self.request_url}: {response.status} OK"
                         )
-                        return data
+                        return result
                     else:
-                        logger.debug(f"ipinfo.io returned status {response.status}")
-                        return None
+                        logger.debug(
+                            f"HTTP test via {protocol.upper()} {host}:{port} -> {self.request_url}: {response.status} FAILED"
+                        )
+                        return None  # 返回 None 表示驗證失敗
 
-        except ImportError:
-            logger.warning(
-                "aiohttp-socks package required for IP info check: pip install aiohttp-socks"
-            )
+        except ImportError as ie:
+            if "aiohttp_socks" in str(ie) and protocol in ["socks4", "socks5"]:
+                logger.warning(
+                    "aiohttp-socks package required for SOCKS proxy validation: pip install aiohttp-socks"
+                )
+            else:
+                logger.warning(f"Import error: {ie}")
             return None
         except Exception as e:
-            logger.debug(f"Failed to get IP info via {host}:{port}: {e}")
+            logger.debug(f"Failed to test {self.request_url} via {protocol.upper()} {host}:{port}: {e}")
             return None
 
     def validate_socks4(
@@ -512,64 +580,75 @@ class SocksValidator:
     async def async_validate_http(
         self, host: str, port: int, test_url: str = "http://httpbin.org/ip"
     ) -> ValidationResult:
-        """Async wrapper for HTTP proxy validation with IP info check"""
+        """Async wrapper for HTTP proxy validation with server request check"""
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None, self.validate_http, host, port, test_url
         )
 
-        # If validation successful and IP info check enabled, get IP information
-        if result.is_valid and self.check_ip_info:
+        # 如果基本驗證成功且啟用了服務器請求檢查，進行額外的 HTTP 請求驗證
+        if result.is_valid and self.check_server_via_request and self.request_url:
             try:
-                import aiohttp
-
-                proxy_url = f"http://{host}:{port}"
-
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as session:
-                    async with session.get(
-                        "https://ipinfo.io/json", proxy=proxy_url
-                    ) as response:
-                        if response.status == 200:
-                            ip_info = await response.json()
-                            result.ip_info = ip_info
+                server_response = await self.check_server_via_proxy(host, port, "http")
+                if server_response:
+                    result.ip_info = server_response
+                else:
+                    # 如果服務器請求失敗，則整個驗證失敗
+                    result.is_valid = False
+                    result.error = f"Server request to {self.request_url} failed"
             except Exception as e:
-                logger.debug(f"HTTP {host}:{port} - IP info lookup failed: {e}")
+                logger.debug(f"HTTP {host}:{port} - Server request failed: {e}")
+                # 如果啟用了服務器請求檢查但失敗了，則整個驗證失敗
+                result.is_valid = False
+                result.error = f"Server request error: {e}"
 
         return result
 
     async def async_validate_socks4(
         self, host: str, port: int, target_host: str = "8.8.8.8", target_port: int = 80
     ) -> ValidationResult:
-        """Async wrapper for SOCKS4 validation with IP info check"""
+        """Async wrapper for SOCKS4 validation with server request check"""
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None, self.validate_socks4, host, port, target_host, target_port
         )
 
-        # If validation successful and IP info check enabled, get IP information
-        if result.is_valid and self.check_ip_info:
+        # 如果基本驗證成功且啟用了服務器請求檢查，進行額外的 HTTP 請求驗證
+        if result.is_valid and self.check_server_via_request and self.request_url:
             try:
-                ip_info = await self.check_ip_info_via_proxy(host, port, "socks4")
-                result.ip_info = ip_info
+                server_response = await self.check_server_via_proxy(host, port, "socks4")
+                if server_response:
+                    result.ip_info = server_response
+                else:
+                    # 如果服務器請求失敗，則整個驗證失敗
+                    result.is_valid = False
+                    result.error = f"Server request to {self.request_url} failed"
             except Exception as e:
-                logger.debug(f"SOCKS4 {host}:{port} - IP info lookup failed: {e}")
+                logger.debug(f"SOCKS4 {host}:{port} - Server request failed: {e}")
+                result.is_valid = False
+                result.error = f"Server request error: {e}"
 
         return result
 
     async def async_validate_socks5(self, host: str, port: int) -> ValidationResult:
-        """Async wrapper for SOCKS5 validation with IP info check"""
+        """Async wrapper for SOCKS5 validation with server request check"""
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, self.validate_socks5, host, port)
 
-        # If validation successful and IP info check enabled, get IP information
-        if result.is_valid and self.check_ip_info:
+        # 如果基本驗證成功且啟用了服務器請求檢查，進行額外的 HTTP 請求驗證
+        if result.is_valid and self.check_server_via_request and self.request_url:
             try:
-                ip_info = await self.check_ip_info_via_proxy(host, port, "socks5")
-                result.ip_info = ip_info
+                server_response = await self.check_server_via_proxy(host, port, "socks5")
+                if server_response:
+                    result.ip_info = server_response
+                else:
+                    # 如果服務器請求失敗，則整個驗證失敗
+                    result.is_valid = False
+                    result.error = f"Server request to {self.request_url} failed"
             except Exception as e:
-                logger.debug(f"SOCKS5 {host}:{port} - IP info lookup failed: {e}")
+                logger.debug(f"SOCKS5 {host}:{port} - Server request failed: {e}")
+                result.is_valid = False
+                result.error = f"Server request error: {e}"
 
         return result
 

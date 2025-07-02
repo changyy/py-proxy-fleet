@@ -2,9 +2,10 @@
 """
 SOCKS 代理驗證示例，包含 ipinfo.io 查詢功能
 
-這個示例展示如何使用增強的 SOCKS 驗證器來：
+這個示例展示如何使用新的 SocksValidator API 來：
 1. 驗證 SOCKS 代理的連接性
-2. 查詢通過代理的真實 IP 信息
+2. 可選地通過代理查詢真實 IP 信息（只有在提供 request_url 時）
+3. 展示新的參數用法：check_server_via_request 和 request_url
 """
 
 import asyncio
@@ -31,8 +32,12 @@ async def test_proxy_with_ip_info():
     print("🚀 開始 SOCKS 代理驗證（包含 IP 信息檢查）")
     print("=" * 60)
 
-    # 初始化驗證器，啟用 IP 信息檢查
-    validator = SocksValidator(timeout=15, check_ip_info=True)
+    # 創建帶有 HTTP 請求驗證的 SOCKS 驗證器
+    validator = SocksValidator(
+        timeout=15, 
+        check_server_via_request=True,
+        request_url="https://ipinfo.io/json"
+    )
 
     for i, proxy in enumerate(test_proxies, 1):
         print(f"\n📡 [{i}] 測試代理: {proxy['host']}:{proxy['port']}")
@@ -82,7 +87,12 @@ async def test_batch_validation():
 
     try:
         downloader = ProxyDownloader()
-        validator = SocksValidator(timeout=10, check_ip_info=True)
+        # 創建帶有 HTTP 請求驗證的 SOCKS 驗證器
+        validator = SocksValidator(
+            timeout=10, 
+            check_server_via_request=True,
+            request_url="https://ipinfo.io/json"
+        )
 
         print("📥 下載 SOCKS5 代理列表...")
         proxies = await downloader.download_proxy_list("socks5", limit=3)
@@ -120,6 +130,6 @@ if __name__ == "__main__":
         print(f"\n💡 使用提示:")
         print(f"   - 確保已安裝 aiohttp-socks: pip install aiohttp-socks")
         print(f"   - 測試真實代理時請替換示例中的 IP 和端口")
-        print(f"   - 可以通過 check_ip_info=False 禁用 IP 檢查以提高速度")
+        print(f"   - 可以通過 check_server_via_request=False 禁用 HTTP 請求檢查以提高速度")
 
     asyncio.run(main())
