@@ -891,6 +891,9 @@ def main(
                                 host, port, False, proxy_type=test_proxy_type.lower()
                             )
                             return {"proxy": proxy, "result": None, "error": "Validation timeout"}
+                        except asyncio.CancelledError:
+                            # Handle cancellation gracefully - don't update storage on cancellation
+                            return {"proxy": proxy, "result": None, "error": "Cancelled"}
                         except Exception as e:
                             storage.update_proxy_status(
                                 host, port, False, proxy_type=test_proxy_type.lower()
@@ -915,23 +918,45 @@ def main(
                 )
                 
                 try:
+                    # Create tasks for better cancellation control
+                    tasks = [asyncio.create_task(validate_single_proxy(proxy)) for proxy in proxies]
+                    
                     validation_results = await asyncio.wait_for(
-                        asyncio.gather(
-                            *[validate_single_proxy(proxy) for proxy in proxies],
-                            return_exceptions=True
-                        ),
+                        asyncio.gather(*tasks, return_exceptions=True),
                         timeout=total_timeout
                     )
                 except asyncio.TimeoutError:
                     click.echo(f"\n⚠️  Overall validation timeout reached ({total_timeout:.0f}s)")
                     click.echo(f"📊 Progress: {completed_tasks}/{len(proxies)} tasks processed")
+                    # Cancel remaining tasks on timeout
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    # Wait for cancellation to complete
+                    try:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                    except:
+                        pass
                     validation_results = []  # Empty results on timeout
+                except asyncio.CancelledError:
+                    # Handle cancellation explicitly
+                    click.echo(f"\n🛑 Validation cancelled")
+                    # Cancel remaining tasks
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    # Wait for cancellation to complete
+                    try:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                    except:
+                        pass
+                    raise  # Re-raise to be handled by outer exception handler
 
                 # Restore the original executor (only if it was not None)
                 if old_executor is not None:
                     loop.set_default_executor(old_executor)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             click.echo(f"\n🛑 Graceful shutdown initiated by user (Ctrl+C)")
             click.echo(f"⏳ Please wait for active connections to complete...")
             click.echo(f"📊 Progress: {completed_tasks}/{len(proxies)} tasks processed")
@@ -945,14 +970,19 @@ def main(
                 all_tasks = [task for task in asyncio.all_tasks() if task != current_task]
                 if all_tasks:
                     for task in all_tasks:
-                        task.cancel()
+                        if not task.done():
+                            task.cancel()
                     
-                    # Wait briefly for cancellation
-                    await asyncio.sleep(0.5)
+                    # Wait for cancellation to complete
+                    try:
+                        await asyncio.wait(all_tasks, timeout=2.0, return_when=asyncio.ALL_COMPLETED)
+                    except asyncio.TimeoutError:
+                        click.echo("⚠️  Some tasks did not complete in time")
                     
-                    # Clean up any remaining tasks
+                    # Count cancelled tasks
                     cancelled_count = sum(1 for task in all_tasks if task.cancelled())
-                    click.echo(f"🔧 Cancelled {cancelled_count}/{len(all_tasks)} tasks")
+                    completed_count = sum(1 for task in all_tasks if task.done() and not task.cancelled())
+                    click.echo(f"🔧 Cancelled: {cancelled_count}, Completed: {completed_count}, Total: {len(all_tasks)} tasks")
                     
             except Exception as e:
                 click.echo(f"⚠️  Cleanup error: {e}")
@@ -975,12 +1005,16 @@ def main(
         valid_count = 0
         failed_count = 0
         exception_count = 0
+        cancelled_count = 0
         
         for validation_result in validation_results:
             # Check if this is an exception (due to return_exceptions=True)
             if isinstance(validation_result, Exception):
-                failed_count += 1
-                exception_count += 1
+                if isinstance(validation_result, asyncio.CancelledError):
+                    cancelled_count += 1
+                else:
+                    failed_count += 1
+                    exception_count += 1
                 continue
                 
             # Check if the result is valid
@@ -995,6 +1029,11 @@ def main(
 
             if not proxy:
                 failed_count += 1
+                continue
+                
+            # Handle cancelled tasks
+            if error == "Cancelled":
+                cancelled_count += 1
                 continue
 
             host, port = proxy["host"], proxy["port"]
@@ -1033,7 +1072,14 @@ def main(
         click.echo(f"   ❌ Failed proxies: {failed_count}")
         if exception_count > 0:
             click.echo(f"   ⚠️  Exception errors: {exception_count}")
-        click.echo(f"   📈 Success rate: {(valid_count/len(proxies)*100):.1f}%")
+        if cancelled_count > 0:
+            click.echo(f"   🚫 Cancelled tasks: {cancelled_count}")
+        
+        total_processed = valid_count + failed_count + exception_count
+        if total_processed > 0:
+            click.echo(f"   📈 Success rate: {(valid_count/total_processed*100):.1f}%")
+        else:
+            click.echo(f"   📈 No tasks completed successfully")
 
         return valid_proxies
 
@@ -1364,6 +1410,14 @@ def main(
         click.echo("⏳ Please wait for active connections to complete...")
         click.echo("👋 Goodbye!")
         sys.exit(130)  # Standard exit code for SIGINT
+    except asyncio.CancelledError:
+        # Handle cancelled errors gracefully
+        click.echo("\n🛑 Operation cancelled")
+        click.echo("👋 Goodbye!")
+        sys.exit(130)
+    except Exception as e:
+        click.echo(f"\n❌ Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ from .utils.socks_validator import SocksValidator
 from .models.config import FleetConfig
 from .models.proxy import ProxyServer, ProxyProtocol, ProxyStatus
 
-__version__ = "2.1.1"
+__version__ = "2.1.2"
 __author__ = "changyy"
 
 __all__ = [
